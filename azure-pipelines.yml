@@ -28,6 +28,6 @@ steps:
   displayName: 'Configure'
 - bash: |
     set -x
-    make -C $(Build.SourcesDirectory)/build
-    make -C $(Build.SourcesDirectory)/build test
+    VERBOSE=1 make -j3 -C $(Build.SourcesDirectory)/build
+    CTEST_OUTPUT_ON_FAILURE=1 VERBOSE=1 make -C $(Build.SourcesDirectory)/build test
   displayName: 'Build'
