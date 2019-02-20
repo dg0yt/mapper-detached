@@ -1,0 +1,33 @@
+# C/C++ with GCC
+# Build your C/C++ project with GCC using make.
+# Add steps that publish test results, save build artifacts, deploy, and more:
+# https://docs.microsoft.com/azure/devops/pipelines/apps/c-cpp/gcc
+
+trigger:
+- master
+
+pr: none
+
+pool:
+  vmImage: 'Ubuntu-16.04'
+
+steps:
+- bash: |
+    set -x
+    #
+    sudo apt-get update
+    sudo apt-get install debhelper doxygen pkg-config sqlite3 libproj-dev libgdal-dev qtbase5-dev qtbase5-private-dev qtbase5-dev-tools qttools5-dev qttools5-dev-tools libqt5sql5-sqlite libpolyclipping-dev zlib1g-dev libcups2-dev
+  displayName: 'Prepare'
+- task: CMake@1
+  inputs:
+    workingDirectory: 'build'
+    cmakeArgs: >
+      $(Build.SourcesDirectory)
+      -DCMAKE_BUILD_TYPE=Debug
+      -DLICENSING_PROVIDER=OFF
+  displayName: 'Configure'
+- bash: |
+    set -x
+    make -C $(Build.SourcesDirectory)/build
+    make -C $(Build.SourcesDirectory)/build test
+  displayName: 'Build'
