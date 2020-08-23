@@ -104,6 +104,8 @@ private:
 	
 	Template* temp = nullptr;
 	QPointer<ActionGridBar> widget;
+	QActionGroup* color_options = nullptr;
+	QAction* last_color_option = nullptr;
 	QAction* fill_action = nullptr;
 	QActionGroup* drawing_options = nullptr;
 	

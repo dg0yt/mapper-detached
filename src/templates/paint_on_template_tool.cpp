@@ -28,7 +28,6 @@
 #include <QAction>
 #include <QActionGroup>
 #include <QApplication>
-#include <QButtonGroup>
 #include <QBrush>
 #include <QCursor>
 #include <QFlags>
@@ -43,7 +42,6 @@
 #include <QPolygonF>
 #include <QRgb>
 #include <QSettings>
-#include <QToolButton>
 #include <QVariant>
 
 #include "settings.h"
@@ -166,7 +164,7 @@ ActionGridBar* PaintOnTemplateTool::makeToolBar()
 	auto const icon_size = Util::mmToPixelPhysical(Settings::getInstance().getSetting(Settings::ActionGridBar_ButtonSizeMM).toReal());
 	
 	auto* toolbar = new ActionGridBar(ActionGridBar::Horizontal, 2);
-	auto* color_button_group = new QButtonGroup(this);
+	color_options = new QActionGroup(this);
 	
 	int count = 0;
 	static QColor const default_colors[] = {
@@ -189,8 +187,8 @@ ActionGridBar* PaintOnTemplateTool::makeToolBar()
 		
 		auto* action = new QAction(icon, color.name(QColor::HexArgb), toolbar);
 		action->setCheckable(true);
+		action->setActionGroup(color_options);
 		toolbar->addAction(action, count % 2, count / 2);
-		color_button_group->addButton(toolbar->getButtonForAction(action));
 		if (count == 0 || action->text() == last_color)
 		{
 			paint_color = color;
@@ -202,13 +200,28 @@ ActionGridBar* PaintOnTemplateTool::makeToolBar()
 	
 	auto* erase_action = new QAction(makeEraserIcon(icon_size), tr("Erase"), toolbar);
 	erase_action->setCheckable(true);
+	connect(color_options, &QActionGroup::triggered, erase_action, [this, erase_action]() {
+		drawing_options->setEnabled(true);
+		erase_action->setChecked(false);
+		erasing.setFlag(ExplicitErasing, false);
+	});
 	connect(erase_action, &QAction::triggered, this, [this](bool enabled) {
 		erasing.setFlag(ExplicitErasing, enabled);
 		drawing_options->setEnabled(!enabled);
+		if (enabled)
+		{
+			last_color_option = color_options->checkedAction();
+			if (last_color_option)
+				last_color_option->setChecked(false);
+		}
+		else
+		{
+			color_options->setEnabled(true);
+			if (last_color_option && !color_options->checkedAction())
+				last_color_option->setChecked(true);
+		}
 	});
 	toolbar->addActionAtEnd(erase_action, 0, 1);
-	// de-select color when activating eraser
-	color_button_group->addButton(toolbar->getButtonForAction(erase_action));
 	
 	fill_action = new QAction(QIcon(QString::fromLatin1(":/images/scribble-fill-shapes.png")),
 	                          tr("Filled area"),
