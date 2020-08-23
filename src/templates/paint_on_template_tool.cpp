@@ -205,22 +205,9 @@ ActionGridBar* PaintOnTemplateTool::makeToolBar()
 		erasing.setFlag(ExplicitErasing, enabled);
 		drawing_options->setEnabled(!enabled);
 	});
-	toolbar->addAction(erase_action, count % 2, count / 2);
+	toolbar->addActionAtEnd(erase_action, 0, 1);
 	// de-select color when activating eraser
 	color_button_group->addButton(toolbar->getButtonForAction(erase_action));
-	++count;
-
-	auto* undo_action = new QAction(QIcon(QString::fromLatin1(":/images/undo.png")),
-	                                ::OpenOrienteering::MapEditorController::tr("Undo"),
-	                                toolbar);
-	connect(undo_action, &QAction::triggered, this, &PaintOnTemplateTool::undoSelected);
-	toolbar->addActionAtEnd(undo_action, 0, 0);
-	
-	auto* redo_action = new QAction(QIcon(QString::fromLatin1(":/images/redo.png")),
-	                                ::OpenOrienteering::MapEditorController::tr("Redo"),
-	                                toolbar);
-	connect(redo_action, &QAction::triggered, this, &PaintOnTemplateTool::redoSelected);
-	toolbar->addActionAtEnd(redo_action, 1, 0);
 	
 	fill_action = new QAction(QIcon(QString::fromLatin1(":/images/scribble-fill-shapes.png")),
 	                          tr("Filled area"),
@@ -250,6 +237,18 @@ ActionGridBar* PaintOnTemplateTool::makeToolBar()
 		add_option(tr("Multiply"), Template::ComposeMultiply);
 		add_option(tr("Background"), Template::ComposeBackground);
 	}
+	
+	auto* undo_action = new QAction(QIcon(QString::fromLatin1(":/images/undo.png")),
+	                                ::OpenOrienteering::MapEditorController::tr("Undo"),
+	                                toolbar);
+	connect(undo_action, &QAction::triggered, this, &PaintOnTemplateTool::undoSelected);
+	toolbar->addActionAtEnd(undo_action, 0, 0);
+	
+	auto* redo_action = new QAction(QIcon(QString::fromLatin1(":/images/redo.png")),
+	                                ::OpenOrienteering::MapEditorController::tr("Redo"),
+	                                toolbar);
+	connect(redo_action, &QAction::triggered, this, &PaintOnTemplateTool::redoSelected);
+	toolbar->addActionAtEnd(redo_action, 1, 0);
 	
 	return toolbar;
 }
