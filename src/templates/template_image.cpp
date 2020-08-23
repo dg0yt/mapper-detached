@@ -21,6 +21,7 @@
 
 #include "template_image.h"
 
+#include <algorithm>
 #include <iosfwd>
 #include <iterator>
 #include <utility>
@@ -508,19 +509,10 @@ bool TemplateImage::isGeoreferencingUsable() const
 
 void TemplateImage::drawOntoTemplateImpl(MapCoordF* coords, int num_coords, const QColor& color, qreal width, ScribbleOptions mode)
 {
-	QPointF* points;
+	QPointF* points;   /// \todo Retain allocated memory until the tool is closed.
 	QRect radius_bbox;
-	int draw_iterations = 1;
-
-	bool all_coords_equal = true;
-	for (int i = 1; i < num_coords; ++i)
-	{
-		if (coords[i] != coords[i-1])
-		{
-			all_coords_equal = false;
-			break;
-		}
-	}
+	
+	auto const all_coords_equal = std::equal(coords + 1, coords + num_coords, coords);
 	
 	// Special case for points because drawPolyline() draws nothing in this case.
 	// drawPoint() is also unsuitable because it aligns the point to the closest pixel.
@@ -530,7 +522,6 @@ void TemplateImage::drawOntoTemplateImpl(MapCoordF* coords, int num_coords, cons
 		const qreal ring_radius = 0.8;
 		const qreal width_factor = 2.0;
 		
-		draw_iterations = 2;
 		width *= width_factor;
 		num_coords = 5;
 		points = new QPointF[5];
@@ -574,31 +565,69 @@ void TemplateImage::drawOntoTemplateImpl(MapCoordF* coords, int num_coords, cons
 	if (color.alpha() == 0 && image.format() != QImage::Format_ARGB32_Premultiplied)
 		image = image.convertToFormat(QImage::Format_ARGB32_Premultiplied);
 	
-    QPainter painter;
-	painter.begin(&image);
-	if (color.alpha() == 0)
-		painter.setCompositionMode(QPainter::CompositionMode_Clear);
-	else
-		painter.setOpacity(color.alphaF());
-
+	QPainter painter(&image);
+	painter.setRenderHint(QPainter::Antialiasing);
+	
 	QPen pen(color);
 	pen.setWidthF(width);
 	pen.setCapStyle(Qt::RoundCap);
 	pen.setJoinStyle(Qt::RoundJoin);
-	painter.setPen(pen);
-	painter.setRenderHint(QPainter::Antialiasing);
-
-	if (mode.testFlag(FilledAreas))
+	
+	QBrush brush(color);
+	
+	if (!mode.testFlag(FilledAreas))
 	{
-		painter.setBrush(QBrush(color));
-		for (int i = 0; i < draw_iterations; ++i)
-			painter.drawPolygon(points, num_coords);
-	} else {
-		for (int i = 0; i < draw_iterations; ++i)
-			painter.drawPolyline(points, num_coords);
+		brush.setStyle(Qt::NoBrush);
+		painter.setCompositionMode(QPainter::CompositionMode_SourceOver);
+	}
+	else if (mode.testFlag(ComposeForeground))
+	{
+		pen.setStyle(Qt::NoPen);
+		painter.setCompositionMode(QPainter::CompositionMode_SourceOver);
+	}
+	else if (mode.testFlag(ComposeMultiply))
+	{
+		pen.setStyle(Qt::NoPen);
+		painter.setCompositionMode(QPainter::CompositionMode_Multiply);
+	}
+	else if (mode.testFlag(ComposePattern))
+	{
+		pen.setStyle(Qt::NoPen);
+		painter.setCompositionMode(QPainter::CompositionMode_DestinationOver);
+	}
+	else if (mode.testFlag(ComposeBackground))
+	{
+		pen.setStyle(Qt::NoPen);
+		painter.setCompositionMode(QPainter::CompositionMode_DestinationOver);
 	}
 	
-	painter.end();
+	if (color.alpha() == 0)
+	{
+		painter.setCompositionMode(QPainter::CompositionMode_Clear);
+	}
+	
+	if (brush.style() == Qt::NoBrush || all_coords_equal)
+	{
+		painter.setPen(pen);
+		painter.drawPolyline(points, num_coords);
+	}
+	else
+	{
+		pen.setCosmetic(true);
+		painter.setPen(pen);
+		painter.setBrush(brush);
+		painter.drawPolygon(points, num_coords);
+		if (mode.testFlag(ComposePattern))
+		{
+			brush.setStyle(Qt::Dense4Pattern);
+			painter.setPen(Qt::NoPen);
+			painter.setBrush(brush);
+			painter.setCompositionMode(QPainter::CompositionMode_SourceOver);
+			painter.setRenderHint(QPainter::Antialiasing, false);
+			painter.drawPolygon(points, num_coords);
+		}
+	}
+	
 	delete[] points;
 }
 

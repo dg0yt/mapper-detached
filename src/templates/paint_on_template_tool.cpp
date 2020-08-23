@@ -26,12 +26,14 @@
 #include <Qt>
 #include <QtMath>
 #include <QAction>
+#include <QActionGroup>
 #include <QApplication>
 #include <QButtonGroup>
 #include <QBrush>
 #include <QCursor>
 #include <QFlags>
 #include <QIcon>
+#include <QMenu>
 #include <QMouseEvent>
 #include <QPainter>
 #include <QPalette>
@@ -157,8 +159,9 @@ void PaintOnTemplateTool::init()
 ActionGridBar* PaintOnTemplateTool::makeToolBar()
 {
 	QSettings settings;
-	settings.beginGroup(QStringLiteral("PaintOnTemplateTool"));
-	auto last_selected = settings.value(QStringLiteral("selectedColor")).toString();
+	paint_options = Template::ScribbleOption(settings.value(QStringLiteral("PaintOnTemplateTool/options")).toInt()
+	                                         & (Template::FilledAreas | Template::CompositionMask));
+	auto const last_color = settings.value(QStringLiteral("PaintOnTemplateTool/selectedColor")).toString();
 	
 	auto const icon_size = Util::mmToPixelPhysical(Settings::getInstance().getSetting(Settings::ActionGridBar_ButtonSizeMM).toReal());
 	
@@ -187,7 +190,7 @@ ActionGridBar* PaintOnTemplateTool::makeToolBar()
 		action->setCheckable(true);
 		toolbar->addAction(action, count % 2, count / 2);
 		color_button_group->addButton(toolbar->getButtonForAction(action));
-		if (count == 0 || action->text() == last_selected)
+		if (count == 0 || action->text() == last_color)
 		{
 			paint_color = color;
 			action->setChecked(true);
@@ -198,7 +201,10 @@ ActionGridBar* PaintOnTemplateTool::makeToolBar()
 	
 	auto* erase_action = new QAction(makeEraserIcon(icon_size), tr("Erase"), toolbar);
 	erase_action->setCheckable(true);
-	connect(erase_action, &QAction::triggered, this, [this](bool enabled) { erasing.setFlag(ExplicitErasing, enabled); });
+	connect(erase_action, &QAction::triggered, this, [this](bool enabled) {
+		erasing.setFlag(ExplicitErasing, enabled);
+		drawing_options->setEnabled(!enabled);
+	});
 	toolbar->addAction(erase_action, count % 2, count / 2);
 	// de-select color when activating eraser
 	color_button_group->addButton(toolbar->getButtonForAction(erase_action));
@@ -216,12 +222,34 @@ ActionGridBar* PaintOnTemplateTool::makeToolBar()
 	connect(redo_action, &QAction::triggered, this, &PaintOnTemplateTool::redoSelected);
 	toolbar->addActionAtEnd(redo_action, 1, 0);
 	
-	auto* fill_action = new QAction(QIcon(QString::fromLatin1(":/images/scribble-fill-shapes.png")),
-	                                tr("Filled area"),
-	                                toolbar);
+	fill_action = new QAction(QIcon(QString::fromLatin1(":/images/scribble-fill-shapes.png")),
+	                          tr("Filled area"),
+	                          toolbar);
 	fill_action->setCheckable(true);
-	connect(fill_action, &QAction::triggered, this, &PaintOnTemplateTool::setFillAreas);
+	fill_action->setChecked(options().testFlag(Template::FilledAreas));
+	connect(fill_action, &QAction::triggered, this, [this](bool checked) {
+		setOptions(Template::ScribbleOptions(options()).setFlag(Template::FilledAreas, checked));
+	});
 	toolbar->addActionAtEnd(fill_action, 1, 1);
+	
+	fill_action->setMenu(new QMenu(toolbar));
+	{
+		drawing_options = new QActionGroup(fill_action->menu()); 
+		auto const add_option = [this](const QString& label, Template::ScribbleOption mode) {
+			auto* option = fill_action->menu()->addAction(label);
+			option->setCheckable(true);
+			option->setActionGroup(drawing_options);
+			option->setChecked(options().testFlag(mode));
+			connect(option, &QAction::triggered, this, [this, mode]() {
+				fill_action->setChecked(true);
+				setOptions(Template::FilledAreas | mode);
+			});
+		};
+		add_option(tr("Foreground"), Template::ComposeForeground);
+		add_option(tr("Pattern"), Template::ComposePattern);
+		add_option(tr("Multiply"), Template::ComposeMultiply);
+		add_option(tr("Background"), Template::ComposeBackground);
+	}
 	
 	return toolbar;
 }
@@ -243,21 +271,19 @@ void PaintOnTemplateTool::templateAboutToBeDeleted(int /*pos*/, Template* temp)
 	}
 }
 
-// slot
-void PaintOnTemplateTool::setFillAreas(bool enabled)
+
+void PaintOnTemplateTool::setOptions(Template::ScribbleOptions options)
 {
-	fill_areas = enabled;
+	paint_options = options;
+	QSettings().setValue(QStringLiteral("PaintOnTemplateTool/options"), int(options));
 }
 
-// slot
 void PaintOnTemplateTool::setColor(const QColor& color)
 {
 	paint_color = color;
-	
-	QSettings settings;
-	settings.beginGroup(QStringLiteral("PaintOnTemplateTool"));
-	settings.setValue(QStringLiteral("selectedColor"), color.name(QColor::HexArgb));
+	QSettings().setValue(QStringLiteral("PaintOnTemplateTool/selectedColor"), color.name(QColor::HexArgb));
 }
+
 
 // slot
 void PaintOnTemplateTool::undoSelected()
@@ -316,12 +342,15 @@ bool PaintOnTemplateTool::mouseReleaseEvent(QMouseEvent* /*event*/, const MapCoo
 		coords.push_back(map_coord);
 		rectInclude(map_bbox, map_coord);
 		
-		auto mode = QFlags<Template::ScribbleOption>()
-		            .setFlag(Template::FilledAreas, fillAreas());
-		
-		temp->drawOntoTemplate(&coords[0], int(coords.size()),
-		        erasing ? QColor(255, 255, 255, 0) : paint_color,
-		        erasing ? erase_width : 0, map_bbox, mode);
+		if (erasing)
+		{
+			auto const erase_mode = options() | Template::ComposeForeground;
+			temp->drawOntoTemplate(&coords[0], int(coords.size()), Qt::transparent, erase_width, map_bbox, erase_mode);
+		}
+		else
+		{
+			temp->drawOntoTemplate(&coords[0], int(coords.size()), paint_color, 0, map_bbox, options());
+		}
 		
 		coords.clear();
 		map()->clearDrawingBoundingBox();
@@ -338,27 +367,35 @@ void PaintOnTemplateTool::draw(QPainter* painter, MapWidget* widget)
 {
 	if (dragging && temp)
 	{
-		auto scale = qMin(temp->getTemplateScaleX(), temp->getTemplateScaleY());
-		
-		QPen pen(erasing ? qRgb(255, 255, 255) : paint_color);
-		pen.setWidthF(widget->getMapView()->lengthToPixel(1000.0 * scale * (erasing ? erase_width : 1)));
+		QPen pen(erasing ? QColor(Qt::white) : paint_color);
 		pen.setCapStyle(Qt::RoundCap);
 		pen.setJoinStyle(Qt::RoundJoin);
 		
+		auto const scale = qMin(temp->getTemplateScaleX(), temp->getTemplateScaleY());
+		auto const one_mm = widget->getMapView()->lengthToPixel(1000.0 * scale);
+		if (options().testFlag(Template::FilledAreas))
+			pen.setWidthF(0.5 * one_mm);
+		else if (erasing)
+			pen.setWidthF(erase_width * one_mm);
+		else
+			pen.setWidthF(one_mm);
+		
 		QPolygonF polygon;
-		polygon.reserve(coords.size());
+		polygon.reserve(coords.size() + 1);
 		for (auto const& coord : coords)
 			polygon.append(widget->mapToViewport(coord));
 
-		if (fillAreas())
+		painter->setPen(pen);
+		if (options().testFlag(Template::FilledAreas))
 		{
-			painter->setPen(Qt::NoPen);
+			polygon.append(polygon.front());  // close the polygon
 			painter->setBrush(QBrush(pen.color(), Qt::Dense5Pattern));
 			painter->drawPolygon(polygon);
 		}
-
-		painter->setPen(pen);
-		painter->drawPolyline(polygon);
+		else
+		{
+			painter->drawPolyline(polygon);
+		}
 	}
 }
 

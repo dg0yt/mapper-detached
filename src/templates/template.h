@@ -141,11 +141,20 @@ public:
 
 	/**
 	 * Modifier options for the scribble tool operation.
+	 * 
+	 * FilledAreas is the key flag which activates filling of areas.
+	 * It shall be combined with one the Compose mode flags.
+	 * ComposeForeground mode takes precedence if its flag is set.
 	 */
 	enum ScribbleOption
 	{
-		NoScribbleOptions = 0,
-		FilledAreas	= 1<<0,  ///< Fill area defined by the scribble line
+		NoScribbleOptions = 0x00,
+		ComposeForeground = 0x01,  ///< Fill areas in the template foreground.
+		ComposeBackground = 0x02,  ///< Fill areas only in free areas.
+		ComposeMultiply   = 0x04,  ///< Blend new areas with the underlying drawing.
+		ComposePattern    = 0x08,  ///< Fill free areas, and use pattern over existing drawing.
+		CompositionMask   = 0x0f,  ///< Not an option but a mask which covers all fill modes.
+		FilledAreas       = 0x80,  ///< Fill the area defined by the scribble line.
 	};
 	Q_DECLARE_FLAGS(ScribbleOptions, ScribbleOption)
 	
