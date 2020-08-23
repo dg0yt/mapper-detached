@@ -21,6 +21,7 @@
 
 #include "paint_on_template_feature.h"
 
+#include <algorithm>
 #include <memory>
 #include <utility>
 
@@ -29,8 +30,6 @@
 #include <QAction>
 #include <QColor>
 #include <QCoreApplication>
-#include <QDialog>
-#include <QDialogButtonBox>
 #include <QDir>
 #include <QFile>
 #include <QFileInfo>
@@ -39,16 +38,16 @@
 #include <QImage>
 #include <QLatin1Char>
 #include <QLatin1String>
-#include <QLineF>
-#include <QListWidget>
-#include <QListWidgetItem>
+#include <QList>
+#include <QMenu>
 #include <QMessageBox>
 #include <QPainter>
+#include <QPixmap>
+#include <QPoint>
 #include <QPointF>
 #include <QRectF>
-#include <QSpacerItem>
-#include <QVariant>
-#include <QVBoxLayout>
+#include <QToolButton>
+#include <QWidget>
 
 #include "core/georeferencing.h"
 #include "core/map.h"
@@ -84,6 +83,43 @@ void showMessage (MainWindow* window, const QString &message) {
 	                     QMessageBox::Ok,
 	                     QMessageBox::Ok);
 #endif
+}
+
+
+/**
+ * Constructs a functor which creates icons representing template position.
+ * 
+ * The functor captures the provided viewport, and creates icons which
+ * represent the template area as white rectangle relative to a gray
+ * rectangle representing the viewport.
+ */
+auto makeIconBuilder(const QRectF& view_rect)
+{
+	QPixmap pixmap(96, 96);
+	pixmap.fill(Qt::transparent);
+	
+	QPainter painter(&pixmap);
+	painter.translate(48, 48);
+	auto const scale = 96.0 / std::max(view_rect.width(), view_rect.height());
+	painter.scale(scale, scale);
+	painter.translate(-view_rect.center());
+	auto const transform = painter.worldTransform();
+	
+	painter.setPen(Qt::black);
+	painter.setBrush(Qt::darkGray);
+	painter.drawRect(view_rect);
+	painter.end();
+	
+	return [pixmap, transform](const QRectF& template_rect) -> QIcon {
+		auto clone = pixmap;
+		QPainter p(&clone);
+		p.setWorldTransform(transform);
+		p.setPen(Qt::black);
+		p.setBrush(Qt::white);
+		p.drawRect(template_rect);
+		p.end();
+		return QIcon{clone};
+	};
 }
 
 
@@ -125,21 +161,16 @@ PaintOnTemplateFeature::PaintOnTemplateFeature(MapEditorController& controller)
 {
 	connect(controller.getMap(), &Map::templateAboutToBeDeleted, this, &PaintOnTemplateFeature::templateAboutToBeDeleted);
 	
+	auto* template_menu = makeTemplateMenu(controller.getMainWidget());
+	
 	paint_action = new QAction(QIcon(QString::fromLatin1(":/images/pencil.png")),
 	                           QCoreApplication::translate("OpenOrienteering::MapEditorController", "Paint on template"),
 	                           this);
 	paint_action->setMenuRole(QAction::NoRole);
 	paint_action->setCheckable(true);
+	paint_action->setMenu(template_menu);
 	paint_action->setWhatsThis(Util::makeWhatThis("toolbars.html#draw_on_template"));
 	connect(paint_action, &QAction::triggered, this, &PaintOnTemplateFeature::paintClicked);
-	
-	// This action used to be listed as "Paint on template settings" in the touch UI.
-	select_action = new QAction(QIcon(QString::fromLatin1(":/images/paint-on-template-settings.png")),
-	                            QCoreApplication::translate("OpenOrienteering::MapEditorController", "Select template..."),
-	                            this);
-	select_action->setMenuRole(QAction::NoRole);
-	select_action->setWhatsThis(Util::makeWhatThis("toolbars.html#draw_on_template"));
-	connect(select_action, &QAction::triggered, this, &PaintOnTemplateFeature::selectTemplateClicked);
 }
 
 PaintOnTemplateFeature::~PaintOnTemplateFeature() = default;
@@ -148,7 +179,6 @@ PaintOnTemplateFeature::~PaintOnTemplateFeature() = default;
 void PaintOnTemplateFeature::setEnabled(bool enabled)
 {
 	paintAction()->setEnabled(enabled);
-	selectAction()->setEnabled(enabled);
 }
 
 
@@ -162,103 +192,65 @@ void PaintOnTemplateFeature::templateAboutToBeDeleted(int /*pos*/, Template* tem
 void PaintOnTemplateFeature::paintClicked(bool checked)
 {
 	if (!checked)
+	{
 		finishPainting();
+	}
 	else if (last_template && last_template->boundingRect().intersects(viewedRect()))
+	{
 		startPainting(last_template);
-	else if (auto* temp = selectTemplate())
-		startPainting(temp);
+	}
 	else
+	{
 		paint_action->setChecked(false);
+		if (auto* button = buttonForPaintAction())
+				button->showMenu();
+	}
 }
 
-void PaintOnTemplateFeature::selectTemplateClicked()
-{
-	if (auto* temp = selectTemplate())
-		startPainting(temp);
-}
 
-Template* PaintOnTemplateFeature::selectTemplate() const
+QMenu* PaintOnTemplateFeature::makeTemplateMenu(QWidget* parent)
 {
-	Template* selected = nullptr;
-	QDialog dialog(controller.getWindow(), Qt::WindowSystemMenuHint | Qt::WindowTitleHint);
-	initTemplateDialog(dialog, selected);
-	dialog.exec();
-	return selected;
-}
-
-void PaintOnTemplateFeature::initTemplateDialog(QDialog& dialog, Template*& selected_template) const
-{
-#if defined(ANDROID)
-	dialog.setWindowState((dialog.windowState() & ~(Qt::WindowMinimized | Qt::WindowFullScreen))
-	                      | Qt::WindowMaximized);
-#endif
-	dialog.setWindowTitle(QCoreApplication::translate("OpenOrienteering::PaintOnTemplateSelectDialog", "Select template to draw onto"));
-	dialog.setWindowModality(Qt::WindowModal);
-	
-	auto* template_list = new QListWidget();
-	initTemplateListWidget(*template_list);
-	
-	auto* button_box = new QDialogButtonBox(QDialogButtonBox::Ok | QDialogButtonBox::Cancel, Qt::Horizontal);
-	
-	auto layout = new QVBoxLayout();
-	layout->addWidget(template_list);
-	layout->addItem(Util::SpacerItem::create(&dialog));
-	layout->addWidget(button_box);
-	dialog.setLayout(layout);
-	
-	connect(button_box, &QDialogButtonBox::rejected, &dialog, &QDialog::reject);
-	connect(button_box, &QDialogButtonBox::accepted, this, [this, template_list, &selected_template, &dialog]() {
-		if (auto* current = template_list->currentItem())
-		{
-			selected_template = reinterpret_cast<Template*>(current->data(Qt::UserRole).value<void*>());
-			if (!selected_template)
-				selected_template = setupTemplate();
-			if (selected_template)
-				dialog.accept();
-		}
+	auto* menu = new QMenu(parent);
+	connect(menu, &QMenu::aboutToShow, this, [this, menu]() {
+		refreshTemplateMenu(menu);
 	});
+	return menu;
 }
 
-void PaintOnTemplateFeature::initTemplateListWidget(QListWidget& list_widget) const
+void PaintOnTemplateFeature::refreshTemplateMenu(QMenu* menu)
 {
-	/// \todo Review source string (no ellipsis when no dialog)
-	auto* item = new QListWidgetItem(QCoreApplication::translate("OpenOrienteering::TemplateListWidget", "Add template..."));
-	item->setData(Qt::UserRole, qVariantFromValue<void*>(nullptr));
-	item->setData(Qt::UserRole + 1, 0.0);
-	list_widget.addItem(item);
-	auto* current_item = item;
+	menu->clear();
+	
+	auto* action_new = menu->addAction(QIcon(QStringLiteral(":/images/plus.png")),
+	                                   QCoreApplication::translate("OpenOrienteering::TemplateListWidget", "Add template..."));
+	connect(action_new, &QAction::triggered, this, [this]() {
+		if (auto* selected_template = setupTemplate())
+			startPainting(selected_template);
+	});
+	menu->addSeparator();
 	
 	auto& map = *controller.getMap();
 	auto const viewed_rect = viewedRect();
-	
+	auto const make_icon = makeIconBuilder(viewed_rect);
 	for (int i = map.getNumTemplates() - 1; i >= 0; --i)
 	{
-		auto& temp = *map.getTemplate(i);
-		if (temp.getTemplateState() == Template::Invalid || !temp.canBeDrawnOnto())
+		// Filter suitable templates
+		auto temp = map.getTemplate(i);
+		if (temp->getTemplateState() == Template::Invalid || !temp->canBeDrawnOnto())
 			continue;
 		
-		auto const bounding_rect = temp.boundingRect();
+		auto const bounding_rect = temp->boundingRect();
 		if (!bounding_rect.intersects(viewed_rect))
 			continue;
 		
-		auto const distance = QLineF(bounding_rect.center(), viewedRect().center()).length();
-		auto row = 0;
-		for (auto last = list_widget.count(); row < last; ++row)
-		{
-			if (list_widget.item(row)->data(Qt::UserRole + 1).toReal() > distance)
-				break;
-		}
-		
-		auto* item = new QListWidgetItem(temp.getTemplateFilename());
-		item->setData(Qt::UserRole, qVariantFromValue<void*>(&temp));
-		item->setData(Qt::UserRole + 1, distance);
-		list_widget.insertItem(row, item);
-		
-		if (&temp == last_template)
-			current_item = item;
+		// Create action
+		auto* action = menu->addAction(make_icon(bounding_rect), temp->getTemplateFilename());
+		connect(action, &QAction::triggered, this, [this, temp]() {
+			startPainting(temp);
+		});
 	}
-	list_widget.setCurrentItem(current_item);
 }
+
 
 Template* PaintOnTemplateFeature::setupTemplate() const
 {
@@ -394,6 +386,8 @@ void PaintOnTemplateFeature::startPainting(Template* temp)
 	view->setTemplateVisibility(temp, vis);
 	
 	tool->setTemplate(temp);
+	
+	paintAction()->setChecked(true);
 }
 
 void PaintOnTemplateFeature::finishPainting()
@@ -408,6 +402,18 @@ QRectF PaintOnTemplateFeature::viewedRect() const
 	auto const& map_widget = *controller.getMainWidget();
 	auto const& view = *map_widget.getMapView();
 	return view.calculateViewedRect(map_widget.viewportToView(map_widget.rect()));
+}
+
+
+QToolButton* PaintOnTemplateFeature::buttonForPaintAction()
+{
+	auto const widgets = paintAction()->associatedWidgets();
+	for (auto* w : widgets)
+	{
+		if (auto* button = qobject_cast<QToolButton*>(w))
+			return button;
+	}
+	return nullptr;
 }
 
 
