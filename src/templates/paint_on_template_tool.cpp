@@ -177,6 +177,7 @@ ActionGridBar* PaintOnTemplateTool::makeToolBar()
 	    qRgb(  0,   0, 255),
 	    qRgb(209,  92,   0),
 	    qRgb(  0,   0,   0),
+	    qRgb(128, 128, 128),
 	};
 	for (auto const& color: default_colors)
 	{
