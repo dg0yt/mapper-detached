@@ -22,9 +22,11 @@
 #define OPENORIENTEERING_MAPPER_PROXYSTYLE_H
 
 #include <QtGlobal>
+#include <QFont>
 #include <QObject>
 #include <QProxyStyle>
 #include <QStyle>
+#include <QVariant>
 
 class QIcon;
 class QPainter;
@@ -57,6 +59,18 @@ Q_OBJECT
 		int item_spacing;
 		int separator_extent;
 		int extension_extent;
+	};
+	
+	/**
+	 * This structure holds custom menu metrics when touch_mode is active.
+	 */
+	struct MenuMetrics
+	{
+		int button_indicator;
+		int h_margin;
+		int v_margin;
+		int panel_width;
+		int scroller_height;
 	};
 	
 public:
@@ -132,13 +146,24 @@ public:
 	 */
 	int styleHint(StyleHint hint, const QStyleOption* option = nullptr, const QWidget* widget = nullptr, QStyleHintReturn* return_data = nullptr) const override;
 	
+	
+	void polish(QApplication* application) override;
+	void unpolish(QApplication* application) override;
+	
+	void polish(QWidget* widget) override;
+	void unpolish(QWidget* widget) override;
+	
 private:
 	void drawSegmentedButton(int segment, PrimitiveElement element, const QStyleOption* option, QPainter* painter, const QWidget* widget) const;
 	
 	void onSettingsChanged(const Settings& settings);
 	
 	ToolBarMetrics toolbar = {};
-	
+	MenuMetrics menu = {};
+	QFont original_font = {};
+	QFont menu_font = {};
+	QVariant button_size;
+	int small_icon_size;
 	bool touch_mode = false;
 	
 	Q_DISABLE_COPY(MapperProxyStyle)

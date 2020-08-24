@@ -189,8 +189,22 @@ int main(int argc, char** argv)
 	QApplication::setStyle(new MapperProxyStyle());
 	QApplication::setPalette(palette);
 	
+	{
+		auto font = QApplication::font();
+		qDebug("%s: %d %d %f", "Font size", font.pixelSize(), font.pointSize(), font.pointSizeF());
+//		if (font.pixelSize() > 0)
+//			font.setPixelSize(font.pixelSize() * 2);
+//		else if (font.pointSize() > 0)
+//			font.setPointSize(font.pointSize() * 2);
+//		else if (font.pointSizeF() > 0)
+//			font.setPointSizeF(font.pointSizeF() * 2);
+//		qDebug("%s: %d %d %f", "Font size", font.pixelSize(), font.pointSize(), font.pointSizeF());
+//		QApplication::setFont(font);
+	}
+	
 	// Create first main window
 	auto first_window = new MainWindow();
+	qDebug("%s: %f", "DPR", first_window->devicePixelRatioF());
 	Q_ASSERT(first_window->testAttribute(Qt::WA_DeleteOnClose));
 	first_window->setController(new HomeScreenController());
 	
